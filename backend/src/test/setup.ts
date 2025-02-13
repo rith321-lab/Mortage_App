@@ -1,21 +1,43 @@
-import { supabase } from '../config/supabase';
-import dotenv from 'dotenv';
+import { AppDataSource } from '../config/database';
+import { User } from '../entities/User';
+import { MortgageApplication } from '../entities/MortgageApplication';
+import { Document } from '../entities/Document';
+import { Property } from '../entities/Property';
+import { LoanDetails } from '../entities/LoanDetails';
+import { BorrowerDetails } from '../entities/BorrowerDetails';
 
-dotenv.config({ path: '.env.test' });
+export async function clearDatabase() {
+  const entities = [
+    Document,
+    MortgageApplication,
+    Property,
+    LoanDetails,
+    BorrowerDetails,
+    User
+  ];
 
-beforeAll(async () => {
-  // Setup test database if needed
-});
-
-afterAll(async () => {
-  // Cleanup after tests
-  await supabase.end();
-});
-
-beforeEach(async () => {
-  // Clear test data before each test
-  const tables = ['documents', 'mortgage_applications', 'users'];
-  for (const table of tables) {
-    await supabase.from(table).delete().neq('id', '0');
+  for (const entity of entities) {
+    const repository = AppDataSource.getRepository(entity);
+    await repository.clear();
   }
-}); 
+}
+
+export async function setupTestDatabase() {
+  // Wait for database connection
+  if (!AppDataSource.isInitialized) {
+    await AppDataSource.initialize();
+  }
+
+  // Clear all data
+  await clearDatabase();
+}
+
+export async function teardownTestDatabase() {
+  // Clear all data
+  await clearDatabase();
+
+  // Close database connection
+  if (AppDataSource.isInitialized) {
+    await AppDataSource.destroy();
+  }
+} 

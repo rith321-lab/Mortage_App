@@ -1,0 +1,15 @@
+{
+    "keep": {
+        "days": true,
+        "amount": 14
+    },
+    "auditLog": "C:\\Users\\rkalakuntla\\Desktop\\Mortage_App\\backend\\src\\logs\\.a1d5d6d9319132da7fc77c078fa82609c63a3026-audit.json",
+    "files": [
+        {
+            "date": 1739408410945,
+            "name": "C:\\Users\\rkalakuntla\\Desktop\\Mortage_App\\backend\\src\\logs\\all-2025-02-12.log",
+            "hash": "84e376ba51bd4b49f5d8e267e684b451d0ca607114099a1b0d32b3c70d1f2d15"
+        }
+    ],
+    "hashType": "sha256"
+}

@@ -5,7 +5,7 @@ import { useNavigate } from "react-router-dom"
 import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
@@ -127,16 +127,14 @@ const InitialApplication = () => {
                 </SelectContent>
               </Select>
             </div>
+            <Button type="submit" className="w-full">
+              Continue to Property Details
+            </Button>
           </form>
         </CardContent>
-        <CardFooter>
-          <Button type="submit" className="w-full">
-            Continue to Property Details
-          </Button>
-        </CardFooter>
       </Card>
     </div>
   )
 }
 
-export default InitialApplication 
+export default InitialApplication

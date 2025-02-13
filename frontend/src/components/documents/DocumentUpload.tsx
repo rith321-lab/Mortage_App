@@ -1,148 +1,175 @@
 import React, { useCallback, useState } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Upload, X, FileText, CheckCircle2, AlertCircle } from 'lucide-react';
+import { Upload, X, FileText, AlertCircle } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
-import { toast } from '@/components/ui/use-toast';
-import { Document, documentService } from '@/services/document.service';
+import { DocumentType } from '@/types';
+import { bytesToSize } from '@/lib/utils';
+import { toast } from 'sonner';
 
 interface DocumentUploadProps {
-  applicationId: string;
-  documentType: string;
-  onUploadComplete: (document: Document) => void;
-  onUploadError: (error: Error) => void;
-}
-
-interface FileWrapper {
-  file: File;
-  progress: number;
-  status: 'pending' | 'uploading' | 'complete' | 'error';
-  error?: string;
+  documentType: DocumentType;
+  onUpload: (file: File) => Promise<void>;
+  maxSize?: number; // in bytes
+  acceptedTypes?: string[];
 }
 
 export function DocumentUpload({
-  applicationId,
   documentType,
-  onUploadComplete,
-  onUploadError
+  onUpload,
+  maxSize = 10 * 1024 * 1024, // 10MB default
+  acceptedTypes = [
+    'application/pdf',
+    'image/jpeg',
+    'image/png',
+    'image/tiff',
+  ],
 }: DocumentUploadProps) {
-  const [uploadingFiles, setUploadingFiles] = useState<FileWrapper[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState<string | null>(null);
 
   const onDrop = useCallback(async (acceptedFiles: File[]) => {
-    const newFiles = acceptedFiles.map(file => ({
-      file,
-      progress: 0,
-      status: 'pending' as const
-    }));
+    const file = acceptedFiles[0];
+    if (!file) return;
 
-    setUploadingFiles(prev => [...prev, ...newFiles]);
+    try {
+      setUploading(true);
+      setError(null);
+      setProgress(0);
 
-    for (const fileWrapper of newFiles) {
-      try {
-        setUploadingFiles(files =>
-          files.map(fw =>
-            fw.file === fileWrapper.file
-              ? { ...fw, status: 'uploading' }
-              : fw
-          )
-        );
-
-        const document = await documentService.upload(
-          fileWrapper.file,
-          documentType as any,
-          applicationId
-        );
-
-        setUploadingFiles(files =>
-          files.map(fw =>
-            fw.file === fileWrapper.file
-              ? { ...fw, status: 'complete', progress: 100 }
-              : fw
-          )
-        );
-
-        onUploadComplete(document);
-        
-        toast({
-          title: 'Upload complete',
-          description: `Successfully uploaded ${fileWrapper.file.name}`
+      // Simulate upload progress
+      const progressInterval = setInterval(() => {
+        setProgress(prev => {
+          if (prev >= 95) {
+            clearInterval(progressInterval);
+            return prev;
+          }
+          return prev + 5;
         });
-      } catch (error) {
-        setUploadingFiles(files =>
-          files.map(fw =>
-            fw.file === fileWrapper.file
-              ? {
-                  ...fw,
-                  status: 'error',
-                  error: error instanceof Error ? error.message : 'Upload failed'
-                }
-              : fw
-          )
-        );
+      }, 100);
 
-        onUploadError(error instanceof Error ? error : new Error('Upload failed'));
-        
-        toast({
-          variant: 'destructive',
-          title: 'Upload failed',
-          description: `Failed to upload ${fileWrapper.file.name}. Please try again.`
-        });
-      }
+      await onUpload(file);
+
+      clearInterval(progressInterval);
+      setProgress(100);
+      toast.success('Document uploaded successfully');
+    } catch (error) {
+      setError(error instanceof Error ? error.message : 'Failed to upload document');
+      toast.error('Failed to upload document');
+    } finally {
+      setUploading(false);
     }
-  }, [applicationId, documentType, onUploadComplete, onUploadError]);
+  }, [onUpload]);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
+  const {
+    getRootProps,
+    getInputProps,
+    isDragActive,
+    isDragReject,
+    acceptedFiles,
+    fileRejections,
+  } = useDropzone({
     onDrop,
-    accept: {
-      'application/pdf': ['.pdf'],
-      'image/jpeg': ['.jpg', '.jpeg'],
-      'image/png': ['.png']
-    },
-    maxSize: 10 * 1024 * 1024 // 10MB
+    maxSize,
+    accept: acceptedTypes.reduce((acc, type) => ({ ...acc, [type]: [] }), {}),
+    maxFiles: 1,
+    disabled: uploading,
   });
 
+  const file = acceptedFiles[0];
+
   return (
-    <div className="space-y-4">
+    <div className="w-full">
       <div
         {...getRootProps()}
         className={`
           border-2 border-dashed rounded-lg p-8 text-center cursor-pointer
-          ${isDragActive ? 'border-primary bg-primary/10' : 'border-gray-300'}
+          transition-colors duration-200 ease-in-out
+          ${isDragActive ? 'border-primary bg-primary/5' : 'border-gray-300'}
+          ${isDragReject ? 'border-red-500 bg-red-50' : ''}
+          ${uploading ? 'opacity-50 cursor-not-allowed' : ''}
         `}
       >
         <input {...getInputProps()} />
-        <Upload className="mx-auto h-12 w-12 text-gray-400" />
-        <p className="mt-2 text-sm text-gray-600">
-          {isDragActive
-            ? 'Drop the files here...'
-            : 'Drag and drop files here, or click to select files'}
-        </p>
+
+        <div className="flex flex-col items-center gap-4">
+          <div className="p-4 bg-primary/10 rounded-full">
+            <Upload className="w-8 h-8 text-primary" />
+          </div>
+
+          {file ? (
+            <div className="flex items-center gap-2">
+              <FileText className="w-5 h-5" />
+              <span className="text-sm font-medium">{file.name}</span>
+              <span className="text-sm text-gray-500">({bytesToSize(file.size)})</span>
+            </div>
+          ) : (
+            <>
+              <div className="text-lg font-medium">
+                {isDragActive
+                  ? 'Drop the file here'
+                  : 'Drag and drop your document here'}
+              </div>
+              <div className="text-sm text-gray-500">
+                or click to select a file
+              </div>
+              <div className="text-xs text-gray-400">
+                Supported formats: PDF, JPEG, PNG, TIFF
+                <br />
+                Maximum size: {bytesToSize(maxSize)}
+              </div>
+            </>
+          )}
+        </div>
       </div>
 
-      {uploadingFiles.length > 0 && (
-        <div className="space-y-2">
-          {uploadingFiles.map((fw) => (
-            <div
-              key={fw.file.name}
-              className="flex items-center gap-4 p-2 border rounded"
-            >
-              <div className="flex-1">
-                <p className="text-sm font-medium">{fw.file.name}</p>
-                <Progress value={fw.progress} className="h-1 mt-1" />
-              </div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => {
-                  setUploadingFiles(files =>
-                    files.filter(f => f.file !== fw.file)
-                  );
-                }}
-              >
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
+      {fileRejections.length > 0 && (
+        <div className="mt-4 p-4 bg-red-50 rounded-lg">
+          <div className="flex items-center gap-2 text-red-600">
+            <AlertCircle className="w-5 h-5" />
+            <span className="font-medium">Invalid file:</span>
+          </div>
+          <ul className="mt-2 text-sm text-red-600 list-disc list-inside">
+            {fileRejections.map(({ errors }) =>
+              errors.map(error => <li key={error.code}>{error.message}</li>)
+            )}
+          </ul>
+        </div>
+      )}
+
+      {uploading && (
+        <div className="mt-4">
+          <div className="flex items-center justify-between text-sm mb-2">
+            <span>Uploading...</span>
+            <span>{progress}%</span>
+          </div>
+          <Progress value={progress} />
+        </div>
+      )}
+
+      {error && (
+        <div className="mt-4 p-4 bg-red-50 rounded-lg">
+          <div className="flex items-center gap-2 text-red-600">
+            <AlertCircle className="w-5 h-5" />
+            <span>{error}</span>
+          </div>
+        </div>
+      )}
+
+      {file && !uploading && (
+        <div className="mt-4 flex justify-end gap-2">
+          <Button
+            variant="outline"
+            onClick={() => acceptedFiles.splice(0, acceptedFiles.length)}
+          >
+            <X className="w-4 h-4 mr-2" />
+            Remove
+          </Button>
+          <Button onClick={() => onDrop([file])}>
+            <Upload className="w-4 h-4 mr-2" />
+            Upload
+          </Button>
         </div>
       )}
     </div>

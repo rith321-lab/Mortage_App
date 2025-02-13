@@ -2,23 +2,16 @@
   "compilerOptions": {
     "target": "ES2018",
     "module": "CommonJS",
-    "lib": ["ES2018", "ESNext.AsyncIterable"],
-    "experimentalDecorators": true,
-    "emitDecoratorMetadata": true,
+    "lib": ["ES2018"],
     "moduleResolution": "node",
     "rootDir": "src",
     "outDir": "dist",
-    "strict": true,
-    "strictPropertyInitialization": false,
     "esModuleInterop": true,
+    "strict": false,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "resolveJsonModule": true,
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/*"]
-    }
+    "resolveJsonModule": true
   },
   "include": ["src/**/*"],
   "exclude": ["node_modules", "dist"]
-} 
+}

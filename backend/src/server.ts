@@ -1,79 +1,118 @@
-import 'reflect-metadata';
 import express, { Request, Response, NextFunction } from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
-import authRoutes from './routes/auth.routes';
-import mortgageRoutes from './routes/mortgage.routes';
+import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 import documentRoutes from './routes/document.routes';
-import { errorHandler } from './middleware/error.middleware';
-import morgan from 'morgan';
-import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
-import { monitorRequest } from './middleware/monitor.middleware';
-import { healthCheck } from './controllers/health.controller';
+import authRoutes from './routes/auth.routes';
 
-// Load environment variables
-dotenv.config();
+interface DocumentData {
+  id: number;
+  applicationId: string;
+  fileName: string;
+  originalName: string;
+  path: string;
+  uploadedAt: Date;
+}
 
-// Configure rate limiting
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100 // limit each IP to 100 requests per windowMs
-});
+// Extend Express Request to include file from multer
+interface MulterRequest extends Request {
+  file: Express.Multer.File;
+}
 
 const app = express();
 
-// Add request logging in development
-if (process.env.NODE_ENV !== 'production') {
-  app.use(morgan('dev'));
-}
-
-// Security headers
-app.use(helmet());
-
-// Apply rate limiting
-app.use(limiter);
-
 // Middleware
-app.use(cors({
-  origin: (origin, callback) => {
-    const allowedOrigins = [
-      process.env.FRONTEND_URL || 'http://localhost:5173',
-      'http://localhost:3000',
-      'http://localhost:5174'
-    ];
-    
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  maxAge: 600 // Increase preflight cache to 10 minutes
-}));
+app.use(cors());
 app.use(express.json());
 
+// Configure multer for file uploads
+const uploadDir = path.join(__dirname, '../uploads');
+if (!fs.existsSync(uploadDir)) {
+  fs.mkdirSync(uploadDir, { recursive: true });
+}
+
+const storage = multer.diskStorage({
+  destination: (_req, _file, cb) => {
+    cb(null, uploadDir);
+  },
+  filename: (_req, file, cb) => {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  const allowedTypes = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'];
+  const ext = path.extname(file.originalname).toLowerCase();
+  if (allowedTypes.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only PDF, DOC, DOCX, JPG, JPEG, and PNG files are allowed.'));
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: { fileSize: 5 * 1024 * 1024 } // 5MB
+});
+
+// Mock storage
+const documents: DocumentData[] = [];
+
 // Routes
+app.use('/api/documents', upload.single('document'), documentRoutes);
 app.use('/api/auth', authRoutes);
-app.use('/api/mortgage', mortgageRoutes);
-app.use('/api/documents', documentRoutes);
 
-// Add monitoring middleware
-app.use(monitorRequest);
+// Serve static files from uploads directory
+app.use('/uploads', express.static(uploadDir));
 
-// Add health check endpoint
-app.get('/health', healthCheck);
+// Error handling middleware
+app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+  console.error('Error:', err);
+  
+  if (err instanceof multer.MulterError) {
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      return res.status(400).json({
+        message: 'File is too large. Maximum size is 5MB'
+      });
+    }
+    return res.status(400).json({
+      message: 'File upload error'
+    });
+  }
 
-// Error handling middleware (should be last)
-app.use(errorHandler);
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({
+      message: err.message
+    });
+  }
 
-// Server startup
-const PORT = process.env.PORT || 5001;
+  res.status(500).json({
+    message: 'Internal server error'
+  });
+});
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-}); 
+// Handle 404
+app.use((req: Request, res: Response) => {
+  res.status(404).json({
+    message: 'Route not found'
+  });
+});
+
+// Health check
+app.get('/api/health', (_req: Request, res: Response) => {
+  res.json({ status: 'ok' });
+});
+
+const PORT = process.env.PORT || 5000;
+
+try {
+  app.listen(PORT, () => {
+    console.log(`Server running on port ${PORT}`);
+  });
+} catch (error) {
+  console.error('Failed to start server:', error);
+  process.exit(1);
+}

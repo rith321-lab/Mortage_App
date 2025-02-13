@@ -1,54 +1,32 @@
 import React from 'react';
-import { FileText, Download, Trash2, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { FileText, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table';
 import { Button } from '@/components/ui/button';
-import { Card } from '@/components/ui/card';
-import { toast } from '@/components/ui/use-toast';
-import { Document, documentService } from '@/services/document.service';
+import { Document } from '@/types';
+import { formatDate, bytesToSize } from '@/lib/utils';
 
 interface DocumentListProps {
   documents: Document[];
-  onDocumentDelete: (documentId: string) => void;
+  onView: (document: Document) => void;
+  onDelete: (document: Document) => void;
 }
 
-export function DocumentList({ documents, onDocumentDelete }: DocumentListProps) {
-  const handleDownload = async (document: Document) => {
-    try {
-      const { downloadUrl } = await documentService.getDownloadUrl(document.id);
-      window.open(downloadUrl, '_blank');
-    } catch (error) {
-      toast({
-        variant: 'destructive',
-        title: 'Download failed',
-        description: error instanceof Error ? error.message : 'Failed to download document',
-      });
-    }
-  };
-
-  const handleDelete = async (document: Document) => {
-    try {
-      await documentService.deleteDocument(document.id);
-      onDocumentDelete(document.id);
-      toast({
-        title: 'Document deleted',
-        description: 'Document has been deleted successfully.',
-      });
-    } catch (error) {
-      toast({
-        variant: 'destructive',
-        title: 'Delete failed',
-        description: error instanceof Error ? error.message : 'Failed to delete document',
-      });
-    }
-  };
-
+export function DocumentList({ documents, onView, onDelete }: DocumentListProps) {
   const getStatusIcon = (status: Document['status']) => {
     switch (status) {
       case 'verified':
-        return <CheckCircle className="h-5 w-5 text-green-500" />;
-      case 'rejected':
-        return <AlertCircle className="h-5 w-5 text-red-500" />;
+        return <CheckCircle className="w-4 h-4 text-green-500" />;
+      case 'issues':
+        return <AlertCircle className="w-4 h-4 text-red-500" />;
       default:
-        return <Clock className="h-5 w-5 text-yellow-500" />;
+        return <Clock className="w-4 h-4 text-yellow-500" />;
     }
   };
 
@@ -56,62 +34,80 @@ export function DocumentList({ documents, onDocumentDelete }: DocumentListProps)
     switch (status) {
       case 'verified':
         return 'Verified';
-      case 'rejected':
-        return 'Rejected';
+      case 'issues':
+        return 'Issues Found';
       default:
-        return 'Pending Review';
+        return 'Pending Verification';
     }
   };
 
-  if (documents.length === 0) {
-    return (
-      <div className="text-center py-8 text-gray-500">
-        No documents uploaded yet
-      </div>
-    );
-  }
-
   return (
-    <div className="space-y-4">
-      {documents.map((document) => (
-        <Card key={document.id} className="p-4">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-4">
-              <FileText className="h-8 w-8 text-blue-500" />
-              <div>
-                <h4 className="font-medium">{document.name}</h4>
-                <div className="flex items-center space-x-2 text-sm text-gray-500">
-                  <span>{new Date(document.uploadedAt).toLocaleDateString()}</span>
-                  <span>•</span>
-                  <div className="flex items-center space-x-1">
-                    {getStatusIcon(document.status)}
-                    <span>{getStatusText(document.status)}</span>
-                  </div>
+    <div className="rounded-md border">
+      <Table>
+        <TableHeader>
+          <TableRow>
+            <TableHead>Document</TableHead>
+            <TableHead>Type</TableHead>
+            <TableHead>Size</TableHead>
+            <TableHead>Status</TableHead>
+            <TableHead>Uploaded</TableHead>
+            <TableHead>Actions</TableHead>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {documents.map((document) => (
+            <TableRow key={document.id}>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-gray-500" />
+                  <span className="font-medium">{document.file_name}</span>
                 </div>
-                {document.notes && (
-                  <p className="text-sm text-gray-600 mt-1">{document.notes}</p>
-                )}
-              </div>
-            </div>
-            <div className="flex items-center space-x-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleDownload(document)}
-              >
-                <Download className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => handleDelete(document)}
-              >
-                <Trash2 className="h-4 w-4 text-red-500" />
-              </Button>
-            </div>
-          </div>
-        </Card>
-      ))}
+              </TableCell>
+              <TableCell>
+                <span className="capitalize">
+                  {document.type.replace(/_/g, ' ')}
+                </span>
+              </TableCell>
+              <TableCell>{bytesToSize(document.file_size)}</TableCell>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  {getStatusIcon(document.status)}
+                  <span>{getStatusText(document.status)}</span>
+                </div>
+              </TableCell>
+              <TableCell>{formatDate(document.created_at)}</TableCell>
+              <TableCell>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onView(document)}
+                  >
+                    View
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => onDelete(document)}
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))}
+          {documents.length === 0 && (
+            <TableRow>
+              <TableCell colSpan={6} className="text-center py-8">
+                <div className="flex flex-col items-center gap-2 text-gray-500">
+                  <FileText className="w-8 h-8" />
+                  <p>No documents uploaded yet</p>
+                </div>
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
     </div>
   );
 } 

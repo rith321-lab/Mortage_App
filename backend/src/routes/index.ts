@@ -1,15 +1,15 @@
 import express from 'express';
-import authRoutes from './auth.routes';
-import documentRoutes from './document.routes'; // Import document routes
+import mortgageApplicationRoutes from './mortgage-application.routes';
+import propertyRoutes from './property.routes';
+import documentRoutes from './document.routes';
+import dashboardRoutes from './dashboard.routes';
 
 const router = express.Router();
 
-router.use('/auth', authRoutes);
-router.use('/documents', documentRoutes); // Add document routes
+// API routes
+router.use('/mortgage-applications', mortgageApplicationRoutes);
+router.use('/properties', propertyRoutes);
+router.use('/documents', documentRoutes);
+router.use('/dashboard', dashboardRoutes);
 
-// Add a simple test route
-router.get('/test', (req, res) => {
-  res.json({ message: 'Backend is reachable!' });
-});
-
-export default router; 
+export default router;

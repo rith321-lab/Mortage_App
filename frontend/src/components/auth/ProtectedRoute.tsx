@@ -1,16 +1,6 @@
-import { Navigate } from 'react-router-dom'
-import { useAuth } from '@/contexts/AuthContext'
+import React from 'react';
 
-interface Props {
-  children: React.ReactNode
-}
-
-export function ProtectedRoute({ children }: Props) {
-  const { isAuthenticated } = useAuth()
-
-  if (!isAuthenticated) {
-    return <Navigate to="/login" replace />
-  }
-
-  return <>{children}</>
+export function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  // For MVP, we don't protect any routes
+  return <>{children}</>;
 } 

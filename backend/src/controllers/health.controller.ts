@@ -1,25 +1,30 @@
 import { Request, Response } from 'express';
-import { supabase } from '../config/supabase';
+import { AppDataSource } from '../config/database';
+import { User } from '../entities/User';
 
 export const healthCheck = async (req: Request, res: Response) => {
   try {
     // Check database connection
-    const { data, error } = await supabase.from('users').select('count').single();
+    const isDbConnected = AppDataSource.isInitialized;
     
-    // Check AWS S3 connection
-    const s3Status = await checkS3Connection();
+    // Get user count as a basic DB query test
+    const userCount = await AppDataSource.getRepository(User).count();
 
     res.json({
       status: 'healthy',
-      database: error ? 'unhealthy' : 'healthy',
-      storage: s3Status ? 'healthy' : 'unhealthy',
       timestamp: new Date().toISOString(),
-      version: process.env.npm_package_version
+      checks: {
+        database: {
+          status: isDbConnected ? 'connected' : 'disconnected',
+          userCount
+        }
+      }
     });
-  } catch (error) {
+  } catch (err: any) {
     res.status(500).json({
       status: 'unhealthy',
-      error: error.message
+      timestamp: new Date().toISOString(),
+      error: err.message || 'An unknown error occurred'
     });
   }
 }; 

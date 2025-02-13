@@ -1,112 +1,126 @@
-import React, { useState } from 'react';
-import { useAuth } from '../context/AuthContext'; // Import useAuth
-import { uploadDocument } from '../api/document';
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { toast } from './ui/use-toast';
-
+import React, { useCallback, useState } from 'react';
+import { useDropzone } from 'react-dropzone';
+import { FiUploadCloud, FiX } from 'react-icons/fi';
+import { motion, AnimatePresence } from 'framer-motion';
+import { S3Service, UploadProgress } from '../services/S3Service';
+import { toast } from '@/components/ui/use-toast';
 
 interface DocumentUploadProps {
-  mortgageApplicationId: string;
+  onUploadSuccess: (url: string, key: string, file: File) => void;
+  acceptedFileTypes?: string[];
+  maxFiles?: number;
+  label?: string;
 }
 
-const DocumentUpload: React.FC<DocumentUploadProps> = ({ mortgageApplicationId }) => {
-  const [file, setFile] = useState<File | null>(null);
-  const [category, setCategory] = useState<string>(''); // State for category
-  const { user } = useAuth(); // Get user from context
-  const [isUploading, setIsUploading] = useState<boolean>(false);
+const DocumentUpload: React.FC<DocumentUploadProps> = ({
+  onUploadSuccess,
+  acceptedFileTypes = ['.pdf', '.jpg', '.jpeg', '.png'],
+  maxFiles = 1,
+  label = 'Upload Documents'
+}) => {
+  const [isUploading, setIsUploading] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState<UploadProgress | null>(null);
+  const s3Service = new S3Service();
 
-  const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (event.target.files && event.target.files.length > 0) {
-      setFile(event.target.files[0]);
-    }
-  };
-
-  const handleCategoryChange = (value: string) => {
-    setCategory(value);
-  };
-
-  const handleSubmit = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!file) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'Please select a file to upload.',
-      });
-      return;
-    }
-    if (!category) {
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'Please select a category.',
-      });
-      return;
-    }
-    if (!user || !user.access_token) { // Check for user and token
-      toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: 'You must be logged in to upload documents.',
-      });
-      return;
-    }
+  const onDrop = useCallback(async (acceptedFiles: File[]) => {
+    if (acceptedFiles.length === 0) return;
 
     setIsUploading(true);
+    setUploadProgress(null);
+
     try {
-      const response = await uploadDocument(file, mortgageApplicationId, category, user.access_token); // Pass token
+      for (const file of acceptedFiles) {
+        const { url, key } = await s3Service.uploadFile(file, (progress) => {
+          setUploadProgress(progress);
+        });
+
+        onUploadSuccess(url, key, file);
+      }
+    } catch (error) {
       toast({
-        title: 'Success',
-        description: 'File uploaded successfully!',
-      });
-      // Optionally, clear the form or update UI
-      setFile(null);
-      setCategory('');
-    } catch (error: any) {
-      toast({
-        variant: 'destructive',
-        title: 'Upload Failed',
-        description: error.message || 'An error occurred during upload.',
+        variant: "destructive",
+        title: "Upload failed",
+        description: error instanceof Error ? error.message : 'Failed to upload file'
       });
     } finally {
       setIsUploading(false);
+      setUploadProgress(null);
     }
+  }, [onUploadSuccess, s3Service]);
+
+  const {
+    getRootProps,
+    getInputProps,
+    isDragActive,
+    isDragAccept,
+    isDragReject
+  } = useDropzone({
+    onDrop,
+    accept: acceptedFileTypes.reduce((acc, type) => ({ ...acc, [type]: [] }), {}),
+    maxFiles,
+    disabled: isUploading
+  });
+
+  const getBorderColor = () => {
+    if (isDragAccept) return 'border-green-400';
+    if (isDragReject) return 'border-red-400';
+    if (isDragActive) return 'border-blue-400';
+    return 'border-gray-300';
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
-      <div>
-        <Label htmlFor="file-upload">Select File</Label>
-        <Input id="file-upload" type="file" onChange={handleFileChange} />
+    <div className="w-full">
+      <div
+        {...getRootProps()}
+        className={`
+          relative w-full p-6 border-2 border-dashed rounded-lg
+          transition-colors duration-150 ease-in-out
+          ${getBorderColor()}
+          ${isDragActive ? 'bg-blue-50' : 'bg-white'}
+          ${isUploading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}
+        `}
+      >
+        <input {...getInputProps()} />
+        <div className="flex flex-col items-center justify-center space-y-3">
+          <FiUploadCloud className="w-12 h-12 text-gray-400" />
+          <div className="text-center">
+            <p className="text-base font-medium text-gray-700">{label}</p>
+            <p className="text-sm text-gray-500">
+              Drag & drop files here, or click to select files
+            </p>
+          </div>
+          <div className="text-xs text-gray-500">
+            {acceptedFileTypes.join(', ')} files up to 50MB
+          </div>
+        </div>
+
+        <AnimatePresence>
+          {uploadProgress && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 flex items-center justify-center bg-white bg-opacity-90"
+            >
+              <div className="w-full max-w-sm px-4">
+                <div className="mb-2 flex items-center justify-between text-sm">
+                  <span className="font-medium text-gray-700">Uploading...</span>
+                  <span className="text-gray-500">{uploadProgress.percentage}%</span>
+                </div>
+                <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+                  <motion.div
+                    className="h-full bg-blue-500"
+                    initial={{ width: 0 }}
+                    animate={{ width: `${uploadProgress.percentage}%` }}
+                    transition={{ duration: 0.1 }}
+                  />
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
-      <div>
-        <Label>Category</Label>
-        <Select onValueChange={handleCategoryChange} value={category}>
-          <SelectTrigger>
-            <SelectValue placeholder="Select a category" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="paystub">Paystub</SelectItem>
-            <SelectItem value="bank_statement">Bank Statement</SelectItem>
-            <SelectItem value="tax_return">Tax Return</SelectItem>
-            <SelectItem value="identification">Identification</SelectItem>
-            <SelectItem value="other">Other</SelectItem>
-          </SelectContent>
-        </Select>
-      </div>
-      <Button type="submit" disabled={isUploading}>
-        {isUploading ? 'Uploading...' : 'Upload Document'}
-      </Button>
-    </form>
+    </div>
   );
 };
 

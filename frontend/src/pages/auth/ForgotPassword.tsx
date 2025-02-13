@@ -1,117 +1,78 @@
-import React from 'react'
-import { useForm } from 'react-hook-form'
-import { zodResolver } from '@hookform/resolvers/zod'
-import { z } from 'zod'
-import { Link } from 'react-router-dom'
-import { useAuth } from '@/contexts/AuthContext'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
-import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form'
-import { toast } from '@/components/ui/use-toast'
-
-const forgotPasswordSchema = z.object({
-  email: z.string().email('Please enter a valid email address')
-})
-
-type ForgotPasswordFormData = z.infer<typeof forgotPasswordSchema>
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { Input } from "@/components/ui/input";
+import { useToast } from "@/components/ui/use-toast";
+import { api } from "@/lib/axios";
 
 export default function ForgotPassword() {
-  const { resetPassword } = useAuth()
-  const [isSubmitted, setIsSubmitted] = React.useState(false)
+  const [email, setEmail] = useState("");
+  const [loading, setLoading] = useState(false);
+  const navigate = useNavigate();
+  const { toast } = useToast();
 
-  const form = useForm<ForgotPasswordFormData>({
-    resolver: zodResolver(forgotPasswordSchema),
-    defaultValues: {
-      email: ''
-    }
-  })
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
 
-  const onSubmit = async (data: ForgotPasswordFormData) => {
     try {
-      await resetPassword(data.email)
-      setIsSubmitted(true)
+      await api.post('/auth/forgot-password', { email });
       toast({
-        title: 'Reset email sent',
-        description: 'Check your email for password reset instructions.'
-      })
+        title: "Success",
+        description: "If an account exists with that email, you will receive password reset instructions.",
+      });
+      navigate('/login');
     } catch (error) {
       toast({
-        variant: 'destructive',
-        title: 'Error',
-        description: error instanceof Error ? error.message : 'Please try again later.'
-      })
+        title: "Error",
+        description: "Something went wrong. Please try again.",
+        variant: "destructive",
+      });
+    } finally {
+      setLoading(false);
     }
-  }
-
-  if (isSubmitted) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
-        <Card className="w-full max-w-md">
-          <CardHeader>
-            <CardTitle>Check Your Email</CardTitle>
-            <CardDescription>
-              We've sent password reset instructions to your email address.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            <p className="text-sm text-gray-600">
-              Didn't receive the email? Check your spam folder or{' '}
-              <button
-                onClick={() => setIsSubmitted(false)}
-                className="text-primary hover:underline"
-              >
-                try again
-              </button>
-            </p>
-          </CardContent>
-          <CardFooter>
-            <Link to="/login" className="text-sm text-primary hover:underline">
-              Back to login
-            </Link>
-          </CardFooter>
-        </Card>
-      </div>
-    )
-  }
+  };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
-      <Card className="w-full max-w-md">
-        <CardHeader>
-          <CardTitle>Reset Password</CardTitle>
-          <CardDescription>
-            Enter your email to receive reset instructions
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-              <FormField
-                control={form.control}
-                name="email"
-                render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Email</FormLabel>
-                    <FormControl>
-                      <Input placeholder="Enter your email" type="email" {...field} />
-                    </FormControl>
-                    <FormMessage />
-                  </FormItem>
-                )}
-              />
-              <Button type="submit" className="w-full" disabled={form.formState.isSubmitting}>
-                {form.formState.isSubmitting ? 'Sending...' : 'Send reset instructions'}
-              </Button>
-            </form>
-          </Form>
-        </CardContent>
-        <CardFooter>
-          <Link to="/login" className="text-sm text-primary hover:underline">
-            Back to login
-          </Link>
-        </CardFooter>
-      </Card>
+    <div className="flex min-h-screen items-center justify-center bg-background">
+      <div className="w-full max-w-md space-y-8 rounded-lg border bg-card p-8 shadow-lg">
+        <div className="text-center">
+          <h2 className="text-3xl font-bold">Forgot Password</h2>
+          <p className="mt-2 text-muted-foreground">
+            Enter your email address and we'll send you instructions to reset your password.
+          </p>
+        </div>
+
+        <form onSubmit={handleSubmit} className="mt-8 space-y-6">
+          <div>
+            <Input
+              type="email"
+              placeholder="Email address"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              required
+              className="w-full"
+            />
+          </div>
+
+          <button
+            type="submit"
+            disabled={loading}
+            className="w-full rounded-md bg-primary px-4 py-2 text-white hover:bg-primary/90 disabled:opacity-50"
+          >
+            {loading ? "Sending..." : "Send Reset Instructions"}
+          </button>
+
+          <div className="text-center">
+            <button
+              type="button"
+              onClick={() => navigate('/login')}
+              className="text-sm text-muted-foreground hover:text-primary"
+            >
+              Back to Login
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
-  )
-} 
+  );
+}

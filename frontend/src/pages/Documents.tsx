@@ -1,114 +1,184 @@
-"use client"
+import React, { useState, useEffect } from 'react';
+import { useParams } from 'react-router-dom';
+import axios from 'axios';
 
-import React, { useState } from "react"
-import { Upload, CheckCircle, AlertCircle } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Progress } from "@/components/ui/progress"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from "@/components/ui/card"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+interface Document {
+  id: number;
+  fileName: string;
+  originalName: string;
+  status: string;
+  type: string;
+  uploadedAt: string;
+}
 
-const requiredDocuments = [
-  "Proof of Income",
-  "Bank Statements",
-  "Tax Returns",
-  "Employment Verification",
-  "Property Appraisal",
-]
+const Documents: React.FC = () => {
+  const { applicationId } = useParams<{ applicationId: string }>();
+  const [documents, setDocuments] = useState<Document[]>([]);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [documentType, setDocumentType] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
 
-export default function Documents() {
-  const [uploadedDocuments, setUploadedDocuments] = useState<string[]>([])
-  const [dragActive, setDragActive] = useState(false)
+  const documentTypes = [
+    'Income Verification',
+    'Employment Verification',
+    'Bank Statements',
+    'Tax Returns',
+    'Property Documents',
+    'Identity Documents',
+    'Other'
+  ];
 
-  const handleDrag = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    if (e.type === "dragenter" || e.type === "dragover") {
-      setDragActive(true)
-    } else if (e.type === "dragleave") {
-      setDragActive(false)
+  useEffect(() => {
+    fetchDocuments();
+  }, [applicationId]);
+
+  const fetchDocuments = async () => {
+    try {
+      const response = await axios.get(`/api/documents?applicationId=${applicationId}`);
+      setDocuments(response.data);
+    } catch (error) {
+      setError('Failed to fetch documents');
     }
-  }
+  };
 
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    setDragActive(false)
-    if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      handleFiles(e.dataTransfer.files)
+  const handleFileSelect = (event: React.ChangeEvent<HTMLInputElement>) => {
+    if (event.target.files && event.target.files[0]) {
+      setSelectedFile(event.target.files[0]);
     }
-  }
+  };
 
-  const handleFiles = (files: FileList) => {
-    for (let i = 0; i < files.length; i++) {
-      if (!uploadedDocuments.includes(files[i].name)) {
-        setUploadedDocuments((prev) => [...prev, files[i].name])
-      }
+  const handleUpload = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedFile || !documentType) {
+      setError('Please select a file and document type');
+      return;
     }
-  }
 
-  const uploadProgress = (uploadedDocuments.length / requiredDocuments.length) * 100
+    setUploading(true);
+    setError('');
+
+    const formData = new FormData();
+    formData.append('document', selectedFile);
+    formData.append('documentType', documentType);
+    formData.append('applicationId', applicationId || '');
+
+    try {
+      await axios.post('/api/documents', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+        },
+      });
+      
+      setSelectedFile(null);
+      setDocumentType('');
+      fetchDocuments();
+    } catch (error) {
+      setError('Failed to upload document');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDelete = async (documentId: number) => {
+    try {
+      await axios.delete(`/api/documents/${documentId}`);
+      fetchDocuments();
+    } catch (error) {
+      setError('Failed to delete document');
+    }
+  };
 
   return (
     <div className="container mx-auto p-4">
-      <Card className="w-full">
-        <CardHeader>
-          <CardTitle>Document Upload</CardTitle>
-          <CardDescription>Upload the required documents for your mortgage application</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <Progress value={uploadProgress} className="w-full mb-4" />
-          <p className="text-sm text-muted-foreground mb-4">
-            {uploadedDocuments.length} of {requiredDocuments.length} documents uploaded
-          </p>
+      <h1 className="text-2xl font-bold mb-6">Document Upload</h1>
 
-          <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center ${
-              dragActive ? "border-primary bg-primary/10" : "border-muted-foreground"
-            }`}
-            onDragEnter={handleDrag}
-            onDragLeave={handleDrag}
-            onDragOver={handleDrag}
-            onDrop={handleDrop}
+      {error && (
+        <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded mb-4">
+          {error}
+        </div>
+      )}
+
+      <form onSubmit={handleUpload} className="mb-8">
+        <div className="mb-4">
+          <label className="block text-gray-700 text-sm font-bold mb-2">
+            Document Type
+          </label>
+          <select
+            value={documentType}
+            onChange={(e) => setDocumentType(e.target.value)}
+            className="shadow border rounded w-full py-2 px-3 text-gray-700"
+            required
           >
-            <Upload className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-lg font-medium mb-2">Drag and drop your files here</p>
-            <p className="text-sm text-muted-foreground mb-4">or</p>
-            <Button>Select Files</Button>
-          </div>
+            <option value="">Select document type</option>
+            {documentTypes.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
+          </select>
+        </div>
 
-          <Table className="mt-8">
-            <TableHeader>
-              <TableRow>
-                <TableHead>Document</TableHead>
-                <TableHead>Status</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {requiredDocuments.map((doc) => (
-                <TableRow key={doc}>
-                  <TableCell>{doc}</TableCell>
-                  <TableCell>
-                    {uploadedDocuments.includes(doc) ? (
-                      <span className="flex items-center text-green-600">
-                        <CheckCircle className="mr-2 h-4 w-4" /> Uploaded
-                      </span>
-                    ) : (
-                      <span className="flex items-center text-yellow-600">
-                        <AlertCircle className="mr-2 h-4 w-4" /> Pending
-                      </span>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-        <CardFooter>
-          <Button className="w-full" disabled={uploadedDocuments.length < requiredDocuments.length}>
-            Continue
-          </Button>
-        </CardFooter>
-      </Card>
+        <div className="mb-4">
+          <label className="block text-gray-700 text-sm font-bold mb-2">
+            Select File
+          </label>
+          <input
+            type="file"
+            onChange={handleFileSelect}
+            className="shadow border rounded w-full py-2 px-3 text-gray-700"
+            accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+            required
+          />
+          <p className="text-sm text-gray-500 mt-1">
+            Supported formats: PDF, DOC, DOCX, JPG, JPEG, PNG (max 5MB)
+          </p>
+        </div>
+
+        <button
+          type="submit"
+          disabled={uploading}
+          className={`bg-blue-500 text-white font-bold py-2 px-4 rounded ${
+            uploading ? 'opacity-50 cursor-not-allowed' : 'hover:bg-blue-700'
+          }`}
+        >
+          {uploading ? 'Uploading...' : 'Upload Document'}
+        </button>
+      </form>
+
+      <div>
+        <h2 className="text-xl font-bold mb-4">Uploaded Documents</h2>
+        {documents.length === 0 ? (
+          <p className="text-gray-500">No documents uploaded yet.</p>
+        ) : (
+          <div className="grid gap-4">
+            {documents.map((doc) => (
+              <div
+                key={doc.id}
+                className="border rounded p-4 flex justify-between items-center"
+              >
+                <div>
+                  <p className="font-semibold">{doc.originalName}</p>
+                  <p className="text-sm text-gray-500">
+                    Type: {doc.type} | Status: {doc.status}
+                  </p>
+                  <p className="text-sm text-gray-500">
+                    Uploaded: {new Date(doc.uploadedAt).toLocaleDateString()}
+                  </p>
+                </div>
+                <button
+                  onClick={() => handleDelete(doc.id)}
+                  className="text-red-500 hover:text-red-700"
+                >
+                  Delete
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
     </div>
-  )
-} 
+  );
+};
+
+export default Documents;

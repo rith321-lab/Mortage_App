@@ -1,7 +1,14 @@
 import { aiUnderwritingService } from '../ai-underwriting.service';
 import { AppError } from '../../middleware/error.middleware';
+import { AIUnderwritingService } from '../ai-underwriting.service';
 
 describe('AIUnderwritingService', () => {
+  let service: AIUnderwritingService;
+
+  beforeEach(() => {
+    service = new AIUnderwritingService();
+  });
+
   describe('calculateRiskScore', () => {
     it('should calculate correct risk score for good application', async () => {
       const criteria = {
@@ -33,6 +40,16 @@ describe('AIUnderwritingService', () => {
 
       const result = await aiUnderwritingService['calculateRiskScore'](criteria);
       expect(result).toBeLessThan(60);
+    });
+  });
+
+  describe('analyzeApplication', () => {
+    it('should analyze a complete application', async () => {
+      // Test implementation
+    });
+
+    it('should handle missing documents', async () => {
+      // Test implementation
     });
   });
 }); 

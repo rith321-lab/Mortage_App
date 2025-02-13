@@ -1,15 +1,33 @@
-import { Router } from 'express';
-import { MortgageController } from '../controllers/mortgage.controller';
-import { authMiddleware } from '../middleware/auth.middleware';
+import express from 'express';
+import { MortgageApplicationController } from '../controllers/mortgage-application.controller';
+import { validate } from '../middleware/validation.middleware';
+import { z } from 'zod';
+import { ApplicationStatus } from '../entities/MortgageApplication';
 
-const router = Router();
-const mortgageController = new MortgageController();
+const updateStatusSchema = z.object({
+  status: z.nativeEnum(ApplicationStatus),
+  notes: z.string().optional(),
+});
 
-// Application routes
-router.post('/applications', authMiddleware, mortgageController.createApplication);
-router.put('/applications/:id', authMiddleware, mortgageController.updateApplication);
-router.get('/applications/:id', authMiddleware, mortgageController.getApplication);
-router.get('/applications', authMiddleware, mortgageController.getUserApplications);
-router.post('/applications/:id/submit', authMiddleware, mortgageController.submitApplication);
+const router = express.Router();
+const controller = new MortgageApplicationController();
+
+// Basic CRUD routes without auth
+router.get('/', controller.getAll.bind(controller));
+router.get('/:id', controller.getById.bind(controller));
+router.post('/', controller.create.bind(controller));
+router.put('/:id', controller.update.bind(controller));
+router.delete('/:id', controller.delete.bind(controller));
+
+// Application-specific routes
+router.post('/:id/submit', controller.submit.bind(controller));
+router.post('/draft', controller.saveDraft.bind(controller));
+
+// Update application status (lenders/admin only)
+router.patch(
+  '/:id/status',
+  validate(updateStatusSchema),
+  controller.updateStatus.bind(controller)
+);
 
 export default router; 

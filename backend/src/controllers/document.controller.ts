@@ -1,333 +1,331 @@
 import { Request, Response, NextFunction } from 'express';
-import { supabase } from '../config/supabase';
-import { AppError } from '../middleware/error.middleware';
-import { PutObjectCommand, DeleteObjectCommand } from '@aws-sdk/client-s3';
-import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
-import { s3Client } from '../config/aws';
+import { DocumentService } from '../services/document.service';
+import { DocumentType } from '../entities/Document';
+import { z } from 'zod';
 import multer from 'multer';
+import path from 'path';
+import fs from 'fs';
 
-// Use memory storage for multer
-const upload = multer({ storage: multer.memoryStorage() });
+const documentSchema = z.object({
+  type: z.nativeEnum(DocumentType),
+  name: z.string(),
+  contentType: z.string(),
+});
+
+// Configure multer for file upload
+const storage = multer.diskStorage({
+  destination: (req, file, cb) => {
+    const uploadDir = path.join(__dirname, '../../uploads');
+    // Create uploads directory if it doesn't exist
+    if (!fs.existsSync(uploadDir)) {
+      fs.mkdirSync(uploadDir, { recursive: true });
+    }
+    cb(null, uploadDir);
+  },
+  filename: (req, file, cb) => {
+    // Generate unique filename
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, file.fieldname + '-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+// File filter
+const fileFilter = (req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
+  // Accept only pdf, doc, docx, jpg, jpeg, png
+  const allowedTypes = ['.pdf', '.doc', '.docx', '.jpg', '.jpeg', '.png'];
+  const ext = path.extname(file.originalname).toLowerCase();
+  
+  if (allowedTypes.includes(ext)) {
+    cb(null, true);
+  } else {
+    cb(new Error('Invalid file type. Only PDF, DOC, DOCX, JPG, JPEG, and PNG files are allowed.'));
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  fileFilter: fileFilter,
+  limits: {
+    fileSize: 5 * 1024 * 1024 // 5MB limit
+  }
+});
 
 export class DocumentController {
-  // Middleware for handling file uploads
-  public uploadMiddleware = upload.single('file');
+  private documentService: DocumentService;
 
-  public uploadDocument = async (req: Request, res: Response, next: NextFunction) => {
+  constructor() {
+    this.documentService = new DocumentService();
+  }
+
+  // Generate pre-signed URL for upload
+  async getUploadUrl(req: Request, res: Response, next: NextFunction) {
     try {
-      if (!req.file) {
-        throw new AppError(400, 'No file uploaded');
-      }
+      const { type, name, contentType } = documentSchema.parse(req.body);
+      const { applicationId } = req.params;
 
-      const file = req.file;
-      const userId = req.user?.id; // Assuming authMiddleware is used
-      const { mortgageApplicationId, category } = req.body; // Get mortgage app ID and category
-
-      if (!userId) {
-        throw new AppError(401, 'Unauthorized');
-      }
-      if(!mortgageApplicationId) {
-        throw new AppError(400, 'Mortgage application ID is required');
-      }
-
-      const fileExtension = file.originalname.split('.').pop();
-      const fileName = `${userId}/${mortgageApplicationId}/${Date.now()}.${fileExtension}`;
-
-      const command = new PutObjectCommand({
-        Bucket: process.env.AWS_S3_BUCKET_NAME,
-        Key: fileName,
-        Body: file.buffer,
-        ContentType: file.mimetype,
+      const { uploadUrl, key } = await this.documentService.getUploadUrl({
+        type,
+        name,
+        contentType,
+        applicationId
       });
-
-      await s3Client.send(command);
-
-      // Insert document metadata into the database
-      const { error: insertError } = await supabase
-        .from('documents')
-        .insert([
-          {
-            user_id: userId,
-            mortgage_application_id: mortgageApplicationId,
-            file_name: file.originalname,
-            file_path: fileName, // Store the S3 key
-            file_type: file.mimetype,
-            category: category,
-          },
-        ]);
-
-      if (insertError) {
-        throw new AppError(500, `Database error: ${insertError.message}`);
-      }
-
-      res.status(201).json({
-        message: 'File uploaded successfully',
-        filePath: fileName,
-      });
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  // Initiate document upload
-  public initiateUpload = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const userId = req.user?.id;
-      const { applicationId, type, name } = req.body;
-
-      if (!userId) {
-        throw new AppError(401, 'User not authenticated');
-      }
-
-      // Create document record
-      const { data: document, error: docError } = await supabase
-        .from('documents')
-        .insert({
-          applicationId,
-          userId,
-          type,
-          name,
-          status: 'pending',
-          uploadedAt: new Date(),
-        })
-        .select()
-        .single();
-
-      if (docError) {
-        throw new AppError(400, docError.message);
-      }
-
-      // Generate upload URL
-      const path = `documents/${applicationId}/${document.id}/${name}`;
-      const { data: uploadData, error: uploadError } = await supabase.storage
-        .from('mortgage-docs')
-        .createSignedUploadUrl(path);
-
-      if (uploadError) {
-        throw new AppError(400, uploadError.message);
-      }
 
       res.json({
-        document,
-        uploadUrl: uploadData.signedUrl,
+        data: {
+          uploadUrl,
+          key,
+          type,
+          name
+        }
       });
     } catch (error) {
       next(error);
     }
-  };
+  }
 
-  // Confirm document upload
-  public confirmUpload = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { documentId } = req.params;
-      const userId = req.user?.id;
-
-      const { data: document, error: docError } = await supabase
-        .from('documents')
-        .update({
-          status: 'verified',
-          verifiedAt: new Date(),
-        })
-        .eq('id', documentId)
-        .eq('userId', userId)
-        .select()
-        .single();
-
-      if (docError) {
-        throw new AppError(400, docError.message);
-      }
-
-      res.json(document);
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  // Get documents for an application
-  public getDocuments = async (req: Request, res: Response, next: NextFunction) => {
+  // Create document record after successful upload
+  async create(req: Request, res: Response, next: NextFunction) {
     try {
       const { applicationId } = req.params;
-      const userId = req.user?.id;
+      const { key, type, name, size, contentType } = req.body;
 
-      const { data, error } = await supabase
-        .from('documents')
-        .select('*')
-        .eq('applicationId', applicationId)
-        .eq('userId', userId);
+      const document = await this.documentService.create({
+        key,
+        type,
+        name,
+        size,
+        contentType,
+        applicationId,
+        uploadedBy: req.user?.id!
+      });
 
-      if (error) {
-        throw new AppError(400, error.message);
-      }
-
-      res.json(data);
+      res.status(201).json({
+        data: document
+      });
     } catch (error) {
       next(error);
     }
-  };
+  }
 
-  // Get a specific document
-  public getDocument = async (req: Request, res: Response, next: NextFunction) => {
+  // Get download URL for document
+  async getDownloadUrl(req: Request, res: Response, next: NextFunction) {
     try {
-      const { documentId } = req.params;
-      const userId = req.user?.id;
+      const { id } = req.params;
+      const { downloadUrl, contentType } = await this.documentService.getDownloadUrl(
+        id,
+        req.user?.id!,
+        req.user?.role!
+      );
 
-      const { data, error } = await supabase
-        .from('documents')
-        .select('*')
-        .eq('id', documentId)
-        .eq('userId', userId)
-        .single();
-
-      if (error || !data) {
-        throw new AppError(404, 'Document not found');
-      }
-
-      res.json(data);
+      res.json({
+        data: {
+          downloadUrl,
+          contentType
+        }
+      });
     } catch (error) {
       next(error);
     }
-  };
+  }
 
-  // Delete a document
-  public deleteDocument = async (req: Request, res: Response, next: NextFunction) => {
+  // Get all documents for an application
+  async getAll(req: Request, res: Response, next: NextFunction) {
     try {
-      const { documentId } = req.params;
-      const userId = req.user?.id;
+      const { applicationId } = req.params;
+      const documents = await this.documentService.getAllForApplication(
+        applicationId,
+        req.user?.id!,
+        req.user?.role!
+      );
 
-      // Get document details first
-      const { data: document, error: fetchError } = await supabase
-        .from('documents')
-        .select('*')
-        .eq('id', documentId)
-        .eq('userId', userId)
-        .single();
+      res.json({
+        data: documents
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
 
-      if (fetchError || !document) {
-        throw new AppError(404, 'Document not found');
-      }
-
-      // Delete from storage
-      const path = `documents/${document.applicationId}/${documentId}/${document.name}`;
-      const { error: storageError } = await supabase.storage
-        .from('mortgage-docs')
-        .remove([path]);
-
-      if (storageError) {
-        throw new AppError(400, storageError.message);
-      }
-
-      // Delete document record
-      const { error: deleteError } = await supabase
-        .from('documents')
-        .delete()
-        .eq('id', documentId)
-        .eq('userId', userId);
-
-      if (deleteError) {
-        throw new AppError(400, deleteError.message);
-      }
-
+  // Delete document
+  async delete(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      await this.documentService.delete(id, req.user?.id!, req.user?.role!);
       res.status(204).send();
     } catch (error) {
       next(error);
     }
-  };
+  }
 
-  // Update document status
-  public updateDocumentStatus = async (req: Request, res: Response, next: NextFunction) => {
+  // Verify document
+  async verifyDocument(req: Request, res: Response, next: NextFunction) {
     try {
-      const { documentId } = req.params;
-      const { status, notes } = req.body;
-      const userId = req.user?.id;
+      const { id } = req.params;
+      const { notes } = req.body;
 
-      const { data, error } = await supabase
-        .from('documents')
-        .update({
-          status,
-          notes,
-          verifiedAt: status === 'verified' ? new Date() : null,
-        })
-        .eq('id', documentId)
-        .eq('userId', userId)
-        .select()
-        .single();
+      const document = await this.documentService.verifyDocument(
+        id,
+        req.user?.id!,
+        notes
+      );
 
-      if (error) {
-        throw new AppError(400, error.message);
-      }
-
-      res.json(data);
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  // Get document download URL
-  public getDownloadUrl = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { documentId } = req.params;
-      const userId = req.user?.id;
-
-      // Get document details
-      const { data: document, error: fetchError } = await supabase
-        .from('documents')
-        .select('*')
-        .eq('id', documentId)
-        .eq('userId', userId)
-        .single();
-
-      if (fetchError || !document) {
-        throw new AppError(404, 'Document not found');
-      }
-
-      // Generate download URL
-      const path = `documents/${document.applicationId}/${documentId}/${document.name}`;
-      const { data: downloadData, error: downloadError } = await supabase.storage
-        .from('mortgage-docs')
-        .createSignedUrl(path, 3600); // URL expires in 1 hour
-
-      if (downloadError) {
-        throw new AppError(400, downloadError.message);
-      }
-
-      res.json({ downloadUrl: downloadData.signedUrl });
-    } catch (error) {
-      next(error);
-    }
-  };
-
-  public generateUploadUrl = async (req: Request, res: Response, next: NextFunction) => {
-    try {
-      const { fileName, fileType, documentType, applicationId } = req.body;
-      const key = `documents/${applicationId}/${Date.now()}-${fileName}`;
-
-      // Create document record in database
-      const { data: document, error: dbError } = await supabase
-        .from('documents')
-        .insert({
-          application_id: applicationId,
-          type: documentType,
-          name: fileName,
-          status: 'pending',
-          key
-        })
-        .select()
-        .single();
-
-      if (dbError) throw new AppError(400, dbError.message);
-
-      // Generate pre-signed URL
-      const command = new PutObjectCommand({
-        Bucket: process.env.AWS_S3_BUCKET_NAME,
-        Key: key,
-        ContentType: fileType,
+      res.json({
+        data: document
       });
-
-      const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-
-      res.json({ document, uploadUrl });
     } catch (error) {
       next(error);
     }
-  };
-} 
+  }
+
+  // Reject document
+  async rejectDocument(req: Request, res: Response, next: NextFunction) {
+    try {
+      const { id } = req.params;
+      const { notes } = req.body;
+
+      if (!notes) {
+        throw new Error('Notes are required when rejecting a document');
+      }
+
+      const document = await this.documentService.rejectDocument(
+        id,
+        req.user?.id!,
+        notes
+      );
+
+      res.json({
+        data: document
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  // Upload a document
+  async upload(req: Request, res: Response) {
+    try {
+      upload.single('document')(req, res, async (err) => {
+        if (err) {
+          if (err instanceof multer.MulterError) {
+            if (err.code === 'LIMIT_FILE_SIZE') {
+              return res.status(400).json({ message: 'File size too large. Maximum size is 5MB.' });
+            }
+          }
+          return res.status(400).json({ message: err.message });
+        }
+
+        if (!req.file) {
+          return res.status(400).json({ message: 'No file uploaded.' });
+        }
+
+        const document = {
+          id: Math.floor(Math.random() * 1000) + 1,
+          applicationId: req.body.applicationId,
+          fileName: req.file.filename,
+          originalName: req.file.originalname,
+          mimeType: req.file.mimetype,
+          size: req.file.size,
+          path: req.file.path,
+          uploadedAt: new Date(),
+          status: 'pending',
+          type: req.body.documentType || 'other'
+        };
+
+        res.status(201).json(document);
+      });
+    } catch (error) {
+      res.status(500).json({ message: 'Error uploading document' });
+    }
+  }
+
+  // Get all documents
+  async getAllDocuments(req: Request, res: Response) {
+    try {
+      const applicationId = req.query.applicationId;
+      const documents = await this.documentService.getAllForApplication(
+        applicationId,
+        req.user?.id!,
+        req.user?.role!
+      );
+
+      res.json(documents);
+    } catch (error) {
+      res.status(500).json({ message: 'Error retrieving documents' });
+    }
+  }
+
+  // Get document by ID
+  async getDocumentById(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const document = await this.documentService.getDocumentById(id);
+
+      if (!document) {
+        return res.status(404).json({ message: 'Document not found' });
+      }
+      
+      res.json(document);
+    } catch (error) {
+      res.status(500).json({ message: 'Error retrieving document' });
+    }
+  }
+
+  // Delete document
+  async deleteDocument(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const document = await this.documentService.getDocumentById(id);
+      
+      if (!document) {
+        return res.status(404).json({ message: 'Document not found' });
+      }
+
+      // Delete file from filesystem
+      if (fs.existsSync(document.path)) {
+        fs.unlinkSync(document.path);
+      }
+
+      // Remove from database
+      await this.documentService.delete(id, req.user?.id!, req.user?.role!);
+      
+      res.status(204).send();
+    } catch (error) {
+      res.status(500).json({ message: 'Error deleting document' });
+    }
+  }
+
+  // Verify document
+  async verify(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const document = await this.documentService.getDocumentById(id);
+      
+      if (!document) {
+        return res.status(404).json({ message: 'Document not found' });
+      }
+
+      document.status = 'verified';
+      document.verifiedAt = new Date();
+      
+      res.json(document);
+    } catch (error) {
+      res.status(500).json({ message: 'Error verifying document' });
+    }
+  }
+
+  // Get document status
+  async getStatus(req: Request, res: Response) {
+    try {
+      const { id } = req.params;
+      const document = await this.documentService.getDocumentById(id);
+      
+      if (!document) {
+        return res.status(404).json({ message: 'Document not found' });
+      }
+      
+      res.json({ status: document.status });
+    } catch (error) {
+      res.status(500).json({ message: 'Error retrieving document status' });
+    }
+  }
+}
